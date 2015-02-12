@@ -78,19 +78,19 @@ type Statement struct {
 	handle C.SQLHANDLE
 }
 
-type ODBCError struct {
+type Error struct {
 	SQLState     string
 	NativeError  int
 	ErrorMessage string
 }
 
-func (e *ODBCError) Error() string {
+func (e *Error) Error() string {
 	if e != nil {
 		return e.SQLState + " " + e.ErrorMessage
 	}
 	return ""
 }
-func (e *ODBCError) String() string { return e.Error() }
+func (e *Error) String() string { return e.Error() }
 
 func initEnv() error {
 	if ret := C.SQLAllocHandle(C.SQL_HANDLE_ENV, nil, &Genv); !Success(ret) {
@@ -115,7 +115,7 @@ func Connect(dsn string, params ...interface{}) (*Connection, error) {
 		outConnectionString = (*C.SQLWCHAR)(unsafe.Pointer(&outBuf[0]))
 	)
 	if ret := C.SQLDriverConnectW(C.SQLHDBC(h),
-		C.SQLHWND(unsafe.Pointer(uintptr(0))),
+		nil,
 		(*C.SQLWCHAR)(unsafe.Pointer(StringToUTF16Ptr(dsn))),
 		C.SQL_NTS,
 		outConnectionString,
@@ -510,30 +510,31 @@ func (stmt *Statement) GetField(fieldIndex int) (v interface{}, ftype int, flen 
 		ll        C.SQLSMALLINT
 	)
 
-	ret := C._SQLColAttribute(
+	if ret := C._SQLColAttribute(
 		C.SQLHSTMT(stmt.handle),
 		C.SQLUSMALLINT(fieldIndex+1),
 		C.SQL_DESC_CONCISE_TYPE,
-		C.SQLPOINTER(unsafe.Pointer(uintptr(0))),
+		nil,
 		C.SQLSMALLINT(0),
 		&ll,
-		unsafe.Pointer(&fieldType))
-	if !Success(ret) {
-		// TODO return err
+		unsafe.Pointer(&fieldType)); !Success(ret) {
+		return nil, -1, -1, FormatError(C.SQL_HANDLE_STMT, stmt.handle)
 	}
-	ret = C._SQLColAttribute(
+	if ret := C._SQLColAttribute(
 		C.SQLHSTMT(stmt.handle),
 		C.SQLUSMALLINT(fieldIndex+1),
 		C.SQL_DESC_LENGTH,
-		C.SQLPOINTER(unsafe.Pointer(uintptr(0))),
+		nil,
 		C.SQLSMALLINT(0),
 		&ll,
-		unsafe.Pointer(&fieldLen))
-
-	if !Success(ret) {
-		// TODO return err
+		unsafe.Pointer(&fieldLen)); !Success(ret) {
+		return nil, -1, -1, FormatError(C.SQL_HANDLE_STMT, stmt.handle)
 	}
-	var fl = C.SQLLEN(fieldLen)
+
+	var (
+		ret C.SQLRETURN
+		fl  = C.SQLLEN(fieldLen)
+	)
 	switch int(fieldType) {
 	case C.SQL_BIT:
 		var value C.BYTE
@@ -582,7 +583,13 @@ func (stmt *Statement) GetField(fieldIndex int) (v interface{}, ftype int, flen 
 		}
 	case C.SQL_BINARY, C.SQL_VARBINARY, C.SQL_LONGVARBINARY:
 		var vv int
-		ret = C.SQLGetData(C.SQLHSTMT(stmt.handle), C.SQLUSMALLINT(fieldIndex+1), C.SQL_C_BINARY, C.SQLPOINTER(unsafe.Pointer(&vv)), 0, &fl)
+		ret = C.SQLGetData(
+			C.SQLHSTMT(stmt.handle),
+			C.SQLUSMALLINT(fieldIndex+1),
+			C.SQL_C_BINARY,
+			C.SQLPOINTER(unsafe.Pointer(&vv)),
+			0,
+			&fl)
 		if fl == -1 {
 			v = nil
 		} else {
@@ -592,7 +599,13 @@ func (stmt *Statement) GetField(fieldIndex int) (v interface{}, ftype int, flen 
 		}
 	default:
 		value := make([]byte, fieldLen)
-		ret = C.SQLGetData(C.SQLHSTMT(stmt.handle), C.SQLUSMALLINT(fieldIndex+1), C.SQL_C_BINARY, C.SQLPOINTER(unsafe.Pointer(&value[0])), fieldLen, &fl)
+		ret = C.SQLGetData(
+			C.SQLHSTMT(stmt.handle),
+			C.SQLUSMALLINT(fieldIndex+1),
+			C.SQL_C_BINARY,
+			C.SQLPOINTER(unsafe.Pointer(&value[0])),
+			fieldLen,
+			&fl)
 		v = value
 	}
 	if !Success(ret) {
@@ -611,14 +624,23 @@ func (stmt *Statement) NumFields() (int, error) {
 }
 
 func (stmt *Statement) GetParamType(index int) (int, int, int, int, error) {
-	var data_type, dec_ptr, null_ptr C.SQLSMALLINT
-	var size_ptr C.SQLULEN
-	ret := C.SQLDescribeParam(C.SQLHSTMT(stmt.handle), C.SQLUSMALLINT(index), &data_type, &size_ptr, &dec_ptr, &null_ptr)
-	if !Success(ret) {
-		err := FormatError(C.SQL_HANDLE_STMT, stmt.handle)
-		return -1, -1, -1, -1, err
+	var (
+		dataType C.SQLSMALLINT
+		decPtr   C.SQLSMALLINT
+		nullPtr  C.SQLSMALLINT
+		sizePtr  C.SQLULEN
+	)
+
+	if ret := C.SQLDescribeParam(
+		C.SQLHSTMT(stmt.handle),
+		C.SQLUSMALLINT(index),
+		&dataType,
+		&sizePtr,
+		&decPtr,
+		&nullPtr); !Success(ret) {
+		return -1, -1, -1, -1, FormatError(C.SQL_HANDLE_STMT, stmt.handle)
 	}
-	return int(data_type), int(size_ptr), int(dec_ptr), int(null_ptr), nil
+	return int(dataType), int(sizePtr), int(decPtr), int(nullPtr), nil
 }
 
 func (stmt *Statement) BindParam(index int, param interface{}) error {
@@ -631,6 +653,7 @@ func (stmt *Statement) BindParam(index int, param interface{}) error {
 		BufferLength      C.SQLLEN
 		StrlenOrIndPt     C.SQLLEN
 	)
+
 	v := reflect.ValueOf(param)
 	if param == nil {
 		ft, _, _, _, err := stmt.GetParamType(index)
@@ -661,6 +684,7 @@ func (stmt *Statement) BindParam(index int, param interface{}) error {
 		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 			switch v.Type().Kind() {
 			case reflect.Int:
+				fallthrough
 			case reflect.Int8, reflect.Int16, reflect.Int32:
 				ParameterType = C.SQL_INTEGER
 				ValueType = C.SQL_C_LONG
@@ -683,7 +707,6 @@ func (stmt *Statement) BindParam(index int, param interface{}) error {
 			ParameterValuePtr = C.SQLPOINTER(unsafe.Pointer(&d))
 			BufferLength = 8
 			StrlenOrIndPt = 0
-		case reflect.Complex64, reflect.Complex128:
 		case reflect.String:
 			var slen = C.SQLUINTEGER(len(v.String()))
 			ParameterType = C.SQL_VARCHAR
@@ -750,7 +773,7 @@ func (stmt *Statement) FieldMetadata(col int) (*Field, error) {
 		Nullable      C.SQLSMALLINT
 	)
 	ColumnName := make([]byte, infoBufferLen)
-	ret := C.SQLDescribeCol(C.SQLHSTMT(stmt.handle),
+	if ret := C.SQLDescribeCol(C.SQLHSTMT(stmt.handle),
 		C.SQLUSMALLINT(col),
 		(*C.SQLCHAR)(unsafe.Pointer(&ColumnName[0])),
 		BufferLength,
@@ -758,13 +781,16 @@ func (stmt *Statement) FieldMetadata(col int) (*Field, error) {
 		&DataType,
 		&ColumnSize,
 		&DecimalDigits,
-		&Nullable)
-	if !Success(ret) {
-		err := FormatError(C.SQL_HANDLE_STMT, stmt.handle)
-		return nil, err
+		&Nullable); !Success(ret) {
+		return nil, FormatError(C.SQL_HANDLE_STMT, stmt.handle)
 	}
-	field := &Field{string(ColumnName[0:NameLength]), int(DataType), int(ColumnSize), int(DecimalDigits), int(Nullable)}
-	return field, nil
+	return &Field{
+		Name:          string(ColumnName[0:NameLength]),
+		Type:          int(DataType),
+		Size:          int(ColumnSize),
+		DecimalDigits: int(DecimalDigits),
+		Nullable:      int(Nullable),
+	}, nil
 }
 
 func (stmt *Statement) free() {
@@ -780,26 +806,29 @@ func Success(ret C.SQLRETURN) bool {
 }
 
 func FormatError(ht C.SQLSMALLINT, h C.SQLHANDLE) error {
-	sqlState := make([]uint16, 6)
-	var nativeError C.SQLINTEGER
-	messageText := make([]uint16, C.SQL_MAX_MESSAGE_LENGTH)
-	var textLength C.SQLSMALLINT
-	err := &ODBCError{}
-	i := 0
-	for {
-		i++
-		ret := C.SQLGetDiagRecW(C.SQLSMALLINT(ht),
+	var (
+		nativeError C.SQLINTEGER
+		textLength  C.SQLSMALLINT
+	)
+	var (
+		sqlState    = make([]uint16, 6)
+		messageText = make([]uint16, C.SQL_MAX_MESSAGE_LENGTH)
+		err         = &Error{}
+	)
+
+	for i := 0; ; i++ {
+		if ret := C.SQLGetDiagRecW(
+			C.SQLSMALLINT(ht),
 			h,
-			C.SQLSMALLINT(i),
+			C.SQLSMALLINT(i+1),
 			(*C.SQLWCHAR)(unsafe.Pointer(&sqlState[0])),
 			&nativeError,
 			(*C.SQLWCHAR)(unsafe.Pointer(&messageText[0])),
 			C.SQL_MAX_MESSAGE_LENGTH,
-			&textLength)
-		if ret == C.SQL_INVALID_HANDLE || ret == C.SQL_NO_DATA {
+			&textLength); ret == C.SQL_INVALID_HANDLE || ret == C.SQL_NO_DATA {
 			break
 		}
-		if i == 1 { // first error message save the SQLSTATE.
+		if i == 0 { // first error message save the SQLSTATE.
 			err.SQLState = UTF16ToString(sqlState)
 			err.NativeError = int(nativeError)
 		}
