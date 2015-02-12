@@ -466,23 +466,43 @@ func (stmt *Statement) FetchOne2(row []driver.Value) (eof bool, err *ODBCError) 
 	return false, nil
 }
 
-func (stmt *Statement) GetField(field_index int) (v interface{}, ftype int, flen int, err *ODBCError) {
-	var field_type C.int
-	var field_len C.SQLLEN
-	var ll C.SQLSMALLINT
-	ret := C._SQLColAttribute(C.SQLHSTMT(stmt.handle), C.SQLUSMALLINT(field_index+1), C.SQL_DESC_CONCISE_TYPE, C.SQLPOINTER(unsafe.Pointer(uintptr(0))), C.SQLSMALLINT(0), &ll, unsafe.Pointer(&field_type))
+// GetField .
+func (stmt *Statement) GetField(fieldIndex int) (v interface{}, ftype int, flen int, err *ODBCError) {
+	var (
+		fieldType C.int
+		fieldLen  C.SQLLEN
+		ll        C.SQLSMALLINT
+	)
+
+	ret := C._SQLColAttribute(
+		C.SQLHSTMT(stmt.handle),
+		C.SQLUSMALLINT(fieldIndex+1),
+		C.SQL_DESC_CONCISE_TYPE,
+		C.SQLPOINTER(unsafe.Pointer(uintptr(0))),
+		C.SQLSMALLINT(0),
+		&ll,
+		unsafe.Pointer(&fieldType))
 	if !Success(ret) {
 		// TODO return err
 	}
-	ret = C._SQLColAttribute(C.SQLHSTMT(stmt.handle), C.SQLUSMALLINT(field_index+1), C.SQL_DESC_LENGTH, C.SQLPOINTER(unsafe.Pointer(uintptr(0))), C.SQLSMALLINT(0), &ll, unsafe.Pointer(&field_len))
+	ret = C._SQLColAttribute(
+		C.SQLHSTMT(stmt.handle),
+		C.SQLUSMALLINT(fieldIndex+1),
+		C.SQL_DESC_LENGTH,
+		C.SQLPOINTER(unsafe.Pointer(uintptr(0))),
+		C.SQLSMALLINT(0),
+		&ll,
+		unsafe.Pointer(&fieldLen))
+
 	if !Success(ret) {
 		// TODO return err
 	}
-	var fl C.SQLLEN = C.SQLLEN(field_len)
-	switch int(field_type) {
+	println("hello")
+	var fl = C.SQLLEN(fieldLen)
+	switch int(fieldType) {
 	case C.SQL_BIT:
 		var value C.BYTE
-		ret = C.SQLGetData(C.SQLHSTMT(stmt.handle), C.SQLUSMALLINT(field_index+1), C.SQL_C_BIT, C.SQLPOINTER(unsafe.Pointer(&value)), 0, &fl)
+		ret = C.SQLGetData(C.SQLHSTMT(stmt.handle), C.SQLUSMALLINT(fieldIndex+1), C.SQL_C_BIT, C.SQLPOINTER(unsafe.Pointer(&value)), 0, &fl)
 		if fl == -1 {
 			v = nil
 		} else {
@@ -490,7 +510,7 @@ func (stmt *Statement) GetField(field_index int) (v interface{}, ftype int, flen
 		}
 	case C.SQL_INTEGER, C.SQL_SMALLINT, C.SQL_TINYINT:
 		var value C.long
-		ret = C.SQLGetData(C.SQLHSTMT(stmt.handle), C.SQLUSMALLINT(field_index+1), C.SQL_C_LONG, C.SQLPOINTER(unsafe.Pointer(&value)), 0, &fl)
+		ret = C.SQLGetData(C.SQLHSTMT(stmt.handle), C.SQLUSMALLINT(fieldIndex+1), C.SQL_C_LONG, C.SQLPOINTER(unsafe.Pointer(&value)), 0, &fl)
 		if fl == -1 {
 			v = nil
 		} else {
@@ -498,7 +518,7 @@ func (stmt *Statement) GetField(field_index int) (v interface{}, ftype int, flen
 		}
 	case C.SQL_BIGINT:
 		var value C.longlong
-		ret = C.SQLGetData(C.SQLHSTMT(stmt.handle), C.SQLUSMALLINT(field_index+1), C.SQL_C_SBIGINT, C.SQLPOINTER(unsafe.Pointer(&value)), 0, &fl)
+		ret = C.SQLGetData(C.SQLHSTMT(stmt.handle), C.SQLUSMALLINT(fieldIndex+1), C.SQL_C_SBIGINT, C.SQLPOINTER(unsafe.Pointer(&value)), 0, &fl)
 		if fl == -1 {
 			v = nil
 		} else {
@@ -506,20 +526,20 @@ func (stmt *Statement) GetField(field_index int) (v interface{}, ftype int, flen
 		}
 	case C.SQL_FLOAT, C.SQL_REAL, C.SQL_DOUBLE:
 		var value C.double
-		ret = C.SQLGetData(C.SQLHSTMT(stmt.handle), C.SQLUSMALLINT(field_index+1), C.SQL_C_DOUBLE, C.SQLPOINTER(unsafe.Pointer(&value)), 0, &fl)
+		ret = C.SQLGetData(C.SQLHSTMT(stmt.handle), C.SQLUSMALLINT(fieldIndex+1), C.SQL_C_DOUBLE, C.SQLPOINTER(unsafe.Pointer(&value)), 0, &fl)
 		if fl == -1 {
 			v = nil
 		} else {
 			v = float64(value)
 		}
 	case C.SQL_CHAR, C.SQL_VARCHAR, C.SQL_LONGVARCHAR, C.SQL_WCHAR, C.SQL_WVARCHAR, C.SQL_WLONGVARCHAR:
-		value := make([]uint16, int(field_len)+8)
-		ret = C.SQLGetData(C.SQLHSTMT(stmt.handle), C.SQLUSMALLINT(field_index+1), C.SQL_C_WCHAR, C.SQLPOINTER(unsafe.Pointer(&value[0])), field_len+4, &fl)
+		value := make([]uint16, int(fieldLen)+8)
+		ret = C.SQLGetData(C.SQLHSTMT(stmt.handle), C.SQLUSMALLINT(fieldIndex+1), C.SQL_C_WCHAR, C.SQLPOINTER(unsafe.Pointer(&value[0])), fieldLen+4, &fl)
 		s := UTF16ToString(value)
 		v = s
 	case C.SQL_TYPE_TIMESTAMP, C.SQL_TYPE_DATE, C.SQL_TYPE_TIME, C.SQL_DATETIME:
 		var value C.TIMESTAMP_STRUCT
-		ret = C.SQLGetData(C.SQLHSTMT(stmt.handle), C.SQLUSMALLINT(field_index+1), C.SQL_C_TYPE_TIMESTAMP, C.SQLPOINTER(unsafe.Pointer(&value)), C.SQLLEN(unsafe.Sizeof(value)), &fl)
+		ret = C.SQLGetData(C.SQLHSTMT(stmt.handle), C.SQLUSMALLINT(fieldIndex+1), C.SQL_C_TYPE_TIMESTAMP, C.SQLPOINTER(unsafe.Pointer(&value)), C.SQLLEN(unsafe.Sizeof(value)), &fl)
 		if fl == -1 {
 			v = nil
 		} else {
@@ -527,23 +547,23 @@ func (stmt *Statement) GetField(field_index int) (v interface{}, ftype int, flen
 		}
 	case C.SQL_BINARY, C.SQL_VARBINARY, C.SQL_LONGVARBINARY:
 		var vv int
-		ret = C.SQLGetData(C.SQLHSTMT(stmt.handle), C.SQLUSMALLINT(field_index+1), C.SQL_C_BINARY, C.SQLPOINTER(unsafe.Pointer(&vv)), 0, &fl)
+		ret = C.SQLGetData(C.SQLHSTMT(stmt.handle), C.SQLUSMALLINT(fieldIndex+1), C.SQL_C_BINARY, C.SQLPOINTER(unsafe.Pointer(&vv)), 0, &fl)
 		if fl == -1 {
 			v = nil
 		} else {
 			value := make([]byte, fl)
-			ret = C.SQLGetData(C.SQLHSTMT(stmt.handle), C.SQLUSMALLINT(field_index+1), C.SQL_C_BINARY, C.SQLPOINTER(unsafe.Pointer(&value[0])), C.SQLLEN(fl), &fl)
+			ret = C.SQLGetData(C.SQLHSTMT(stmt.handle), C.SQLUSMALLINT(fieldIndex+1), C.SQL_C_BINARY, C.SQLPOINTER(unsafe.Pointer(&value[0])), C.SQLLEN(fl), &fl)
 			v = value
 		}
 	default:
-		value := make([]byte, field_len)
-		ret = C.SQLGetData(C.SQLHSTMT(stmt.handle), C.SQLUSMALLINT(field_index+1), C.SQL_C_BINARY, C.SQLPOINTER(unsafe.Pointer(&value[0])), field_len, &fl)
+		value := make([]byte, fieldLen)
+		ret = C.SQLGetData(C.SQLHSTMT(stmt.handle), C.SQLUSMALLINT(fieldIndex+1), C.SQL_C_BINARY, C.SQLPOINTER(unsafe.Pointer(&value[0])), fieldLen, &fl)
 		v = value
 	}
 	if !Success(ret) {
 		err = FormatError(C.SQL_HANDLE_STMT, stmt.handle)
 	}
-	return v, int(field_type), int(fl), err
+	return v, int(fieldType), int(fl), err
 }
 
 func (stmt *Statement) NumFields() (int, *ODBCError) {
