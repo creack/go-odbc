@@ -2,7 +2,7 @@ ODBC database driver for Go
 
 Install:
 ```go
-go get github.com/weigj/go-odbc
+go get github.com/creack/go-odbc
 ```
 
 Example:
@@ -13,7 +13,7 @@ package main
 import (
 	"log"
 
-	odbc "github.com/weigj/go-odbc"
+	odbc "github.com/creack/go-odbc"
 )
 
 func main() {
