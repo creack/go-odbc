@@ -368,8 +368,8 @@ func (stmt *Statement) Execute(params ...interface{}) error {
 func (stmt *Statement) Execute2(params []driver.Value) error {
 	if params != nil {
 		var cParams C.SQLSMALLINT
-		ret := C.SQLNumParams(C.SQLHSTMT(stmt.handle), &cParams)
-		if !Success(ret) {
+
+		if ret := C.SQLNumParams(C.SQLHSTMT(stmt.handle), &cParams); !Success(ret) {
 			err := FormatError(C.SQL_HANDLE_STMT, stmt.handle)
 			return err
 		}
@@ -377,8 +377,7 @@ func (stmt *Statement) Execute2(params []driver.Value) error {
 			stmt.BindParam(i+1, params[i])
 		}
 	}
-	ret := C.SQLExecute(C.SQLHSTMT(stmt.handle))
-	if ret == C.SQL_NEED_DATA {
+	if ret := C.SQLExecute(C.SQLHSTMT(stmt.handle)); ret == C.SQL_NEED_DATA {
 		// TODO
 		//		send_data(stmt)
 	} else if ret == C.SQL_NO_DATA {
@@ -397,8 +396,7 @@ func (stmt *Statement) Fetch() (bool, error) {
 		return false, nil
 	}
 	if !Success(ret) {
-		err := FormatError(C.SQL_HANDLE_STMT, stmt.handle)
-		return false, err
+		return false, FormatError(C.SQL_HANDLE_STMT, stmt.handle)
 	}
 	return true, nil
 }
@@ -435,24 +433,32 @@ func (r *Row) GetInt(a interface{}) (ret int64) {
 	return
 }
 
-func (r *Row) GetFloat(a interface{}) (ret float64) {
-	v := r.Get(a)
-	value := reflect.ValueOf(v)
+func (r *Row) GetFloat(a interface{}) float64 {
+	var (
+		ret   float64
+		v     = r.Get(a)
+		value = reflect.ValueOf(v)
+	)
+
 	switch f := value; f.Kind() {
 	case reflect.Float32, reflect.Float64:
 		ret = float64(f.Float())
 	}
-	return
+	return ret
 }
 
-func (r *Row) GetString(a interface{}) (ret string) {
-	v := r.Get(a)
-	value := reflect.ValueOf(v)
+func (r *Row) GetString(a interface{}) string {
+	var (
+		ret   string
+		v     = r.Get(a)
+		value = reflect.ValueOf(v)
+	)
+
 	switch f := value; f.Kind() {
 	case reflect.String:
 		ret = f.String()
 	}
-	return
+	return ret
 }
 
 func (r *Row) Length() int {
@@ -534,6 +540,7 @@ func (stmt *Statement) GetField(fieldIndex int) (v interface{}, ftype int, flen 
 		ret C.SQLRETURN
 		fl  = C.SQLLEN(fieldLen)
 	)
+
 	switch int(fieldType) {
 	case C.SQL_BIT:
 		var value C.BYTE
@@ -567,14 +574,40 @@ func (stmt *Statement) GetField(fieldIndex int) (v interface{}, ftype int, flen 
 		} else {
 			v = float64(value)
 		}
+	case C.SQL_NUMERIC:
+		var value = make([]byte, fl)
+		ret = C.SQLGetData(
+			C.SQLHSTMT(stmt.handle),
+			C.SQLUSMALLINT(fieldIndex+1),
+			C.SQL_C_NUMERIC,
+			C.SQLPOINTER(unsafe.Pointer(&value[0])),
+			fl,
+			&fl)
+		if fl == -1 {
+			v = nil
+		} else {
+			v = value[:fl]
+		}
 	case C.SQL_CHAR, C.SQL_VARCHAR, C.SQL_LONGVARCHAR, C.SQL_WCHAR, C.SQL_WVARCHAR, C.SQL_WLONGVARCHAR:
 		value := make([]uint16, int(fieldLen)+8)
-		ret = C.SQLGetData(C.SQLHSTMT(stmt.handle), C.SQLUSMALLINT(fieldIndex+1), C.SQL_C_WCHAR, C.SQLPOINTER(unsafe.Pointer(&value[0])), fieldLen+4, &fl)
+		ret = C.SQLGetData(
+			C.SQLHSTMT(stmt.handle),
+			C.SQLUSMALLINT(fieldIndex+1),
+			C.SQL_C_WCHAR,
+			C.SQLPOINTER(unsafe.Pointer(&value[0])),
+			fieldLen+4,
+			&fl)
 		s := UTF16ToString(value)
 		v = s
 	case C.SQL_TYPE_TIMESTAMP, C.SQL_TYPE_DATE, C.SQL_TYPE_TIME, C.SQL_DATETIME:
 		var value C.TIMESTAMP_STRUCT
-		ret = C.SQLGetData(C.SQLHSTMT(stmt.handle), C.SQLUSMALLINT(fieldIndex+1), C.SQL_C_TYPE_TIMESTAMP, C.SQLPOINTER(unsafe.Pointer(&value)), C.SQLLEN(unsafe.Sizeof(value)), &fl)
+		ret = C.SQLGetData(
+			C.SQLHSTMT(stmt.handle),
+			C.SQLUSMALLINT(fieldIndex+1),
+			C.SQL_C_TYPE_TIMESTAMP,
+			C.SQLPOINTER(unsafe.Pointer(&value)),
+			C.SQLLEN(unsafe.Sizeof(value)),
+			&fl)
 		if fl == -1 {
 			v = nil
 		} else {
@@ -593,7 +626,13 @@ func (stmt *Statement) GetField(fieldIndex int) (v interface{}, ftype int, flen 
 			v = nil
 		} else {
 			value := make([]byte, fl)
-			ret = C.SQLGetData(C.SQLHSTMT(stmt.handle), C.SQLUSMALLINT(fieldIndex+1), C.SQL_C_BINARY, C.SQLPOINTER(unsafe.Pointer(&value[0])), C.SQLLEN(fl), &fl)
+			ret = C.SQLGetData(
+				C.SQLHSTMT(stmt.handle),
+				C.SQLUSMALLINT(fieldIndex+1),
+				C.SQL_C_BINARY,
+				C.SQLPOINTER(unsafe.Pointer(&value[0])),
+				C.SQLLEN(fl),
+				&fl)
 			v = value
 		}
 	default:
