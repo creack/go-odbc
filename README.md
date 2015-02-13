@@ -11,7 +11,9 @@ Example:
 package main
 
 import (
-	odbc github.com/weigj/go-odbc
+	"log"
+
+	odbc "github.com/weigj/go-odbc"
 )
 
 func main() {
@@ -27,7 +29,7 @@ func main() {
 	}
 	defer stmt.Close()
 
-	if err := stmt.Execute("admin") err != nil {
+	if err := stmt.Execute("admin"); err != nil {
 		log.Fatal(err)
 	}
 
