@@ -343,8 +343,8 @@ func (stmt *Statement) NumParams() int {
 func (stmt *Statement) Execute(params ...interface{}) error {
 	if params != nil {
 		var cParams C.SQLSMALLINT
-		ret := C.SQLNumParams(C.SQLHSTMT(stmt.handle), &cParams)
-		if !Success(ret) {
+
+		if ret := C.SQLNumParams(C.SQLHSTMT(stmt.handle), &cParams); !Success(ret) {
 			err := FormatError(C.SQL_HANDLE_STMT, stmt.handle)
 			return err
 		}
@@ -359,8 +359,7 @@ func (stmt *Statement) Execute(params ...interface{}) error {
 	} else if ret == C.SQL_NO_DATA {
 		// Execute NO DATA
 	} else if !Success(ret) {
-		err := FormatError(C.SQL_HANDLE_STMT, stmt.handle)
-		return err
+		return FormatError(C.SQL_HANDLE_STMT, stmt.handle)
 	}
 	stmt.executed = true
 	return nil
