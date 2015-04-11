@@ -1,8 +1,8 @@
 ODBC database driver for Go
 
 Install:
-```go
-go get github.com/creack/go-odbc
+```bash
+go get github.com/creack/godbc
 ```
 
 Example:
@@ -13,17 +13,17 @@ package main
 import (
 	"log"
 
-	odbc "github.com/creack/go-odbc"
+	"github.com/creack/godbc"
 )
 
 func main() {
-	conn, err := odbc.Connect("DSN=dsn;UID=user;PWD=password")
+	conn, err := godbc.Connect("DSN=dsn;UID=user;PWD=password")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer conn.Close()
 
-	stmt, err := conn.Prepare("select * from user where username = ?")
+	stmt, err := conn.Prepare("SELECT * FROM user WHERE username = ?")
 	if err != nil {
 		log.Fatal(err)
 	}
