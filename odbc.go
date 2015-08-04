@@ -112,11 +112,12 @@ func Connect(dsn string, params ...interface{}) (*Connection, error) {
 	var (
 		stringLength2       C.SQLSMALLINT
 		outBuf              = make([]byte, bufferSize*2)
-		outConnectionString = (*C.SQLWCHAR)(unsafe.Pointer(&outBuf[0]))
+		outConnectionString = (*C.SQLCHAR)(unsafe.Pointer(&outBuf[0]))
 	)
-	if ret := C.SQLDriverConnectW(C.SQLHDBC(h),
+	dsn += "\x00"
+	if ret := C.SQLDriverConnect(C.SQLHDBC(h),
 		nil,
-		(*C.SQLWCHAR)(unsafe.Pointer(StringToUTF16Ptr(dsn))),
+		(*C.SQLCHAR)(unsafe.Pointer(&[]byte(dsn)[0])),
 		C.SQL_NTS,
 		outConnectionString,
 		bufferSize,
@@ -132,11 +133,10 @@ func (conn *Connection) ExecDirect(sql string) (*Statement, error) {
 	if err != nil {
 		return nil, err
 	}
-	wsql := StringToUTF16Ptr(sql)
-
-	if ret := C.SQLExecDirectW(
+	sql += "\x00"
+	if ret := C.SQLExecDirect(
 		C.SQLHSTMT(stmt.handle),
-		(*C.SQLWCHAR)(unsafe.Pointer(wsql)),
+		(*C.SQLCHAR)(unsafe.Pointer(&[]byte(sql)[0])),
 		C.SQL_NTS); !Success(ret) {
 		err := FormatError(C.SQL_HANDLE_STMT, stmt.handle)
 		stmt.Close()
@@ -156,7 +156,7 @@ func (conn *Connection) newStmt() (*Statement, error) {
 }
 
 func (conn *Connection) Prepare(sql string, params ...interface{}) (*Statement, error) {
-	wsql := StringToUTF16Ptr(sql)
+	sql += "\x00"
 
 	stmt, err := conn.newStmt()
 	if err != nil {
@@ -165,7 +165,7 @@ func (conn *Connection) Prepare(sql string, params ...interface{}) (*Statement, 
 
 	if ret := C.SQLPrepareW(
 		C.SQLHSTMT(stmt.handle),
-		(*C.SQLWCHAR)(unsafe.Pointer(wsql)),
+		(*C.SQLWCHAR)(unsafe.Pointer(&[]byte(sql)[0])),
 		C.SQLINTEGER(len(sql))); !Success(ret) {
 		err := FormatError(C.SQL_HANDLE_STMT, stmt.handle)
 		stmt.Close()
@@ -589,16 +589,15 @@ func (stmt *Statement) GetField(fieldIndex int) (v interface{}, ftype int, flen 
 			v = value[:fl]
 		}
 	case C.SQL_CHAR, C.SQL_VARCHAR, C.SQL_LONGVARCHAR, C.SQL_WCHAR, C.SQL_WVARCHAR, C.SQL_WLONGVARCHAR:
-		value := make([]uint16, int(fieldLen)+8)
+		value := make([]byte, int(fieldLen)+8)
 		ret = C.SQLGetData(
 			C.SQLHSTMT(stmt.handle),
 			C.SQLUSMALLINT(fieldIndex+1),
-			C.SQL_C_WCHAR,
+			C.SQL_C_CHAR,
 			C.SQLPOINTER(unsafe.Pointer(&value[0])),
 			fieldLen+4,
 			&fl)
-		s := UTF16ToString(value)
-		v = s
+		v = value[:fl]
 	case C.SQL_TYPE_TIMESTAMP, C.SQL_TYPE_DATE, C.SQL_TYPE_TIME, C.SQL_DATETIME:
 		var value C.TIMESTAMP_STRUCT
 		ret = C.SQLGetData(
